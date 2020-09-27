@@ -44,15 +44,25 @@ func (s *ServerConn) Run(ctx context.Context) {
 		)
 		return
 	}
+	go func(){
+		<-ctx.Done()
+		ln.Close()
+	}()
 	for {
 		conn, err := ln.Accept()
 		if err != nil {
+			if e, ok := err.(*net.OpError); ok {
+				if e.Err.Error() == "use of closed network connection" {
+					break
+				}
+			}
 			s.logger.Error("listening socket error",
 				zap.String("role", s.role),
 				zap.Int("port", s.port),
+				zap.String("error_string", err.Error()),
 				zap.Error(err),
 			)
-			return
+			break
 		}
 		go s.HandleConn(ctx, conn, fmt.Sprintf("127.0.0.1:%d", s.port))
 	}
@@ -88,7 +98,7 @@ func (s *ServerConn) SshClient(ctx context.Context) (*ssh.Client, error) {
 	}
 	for _, reservation := range output.Reservations {
 		for _, instance := range reservation.Instances {
-			client, err := sshIntoInstance(s.logger, svc, instance)
+			client, err := sshIntoInstance(ctx, s.logger, svc, instance)
 			if err != nil {
 				s.logger.DPanic("failed to ssh into instance", zap.Error(err))
 				return nil, err
@@ -128,7 +138,7 @@ func (s *ServerConn) HandleConn(ctx context.Context, conn net.Conn, address stri
 	wg.Wait()
 }
 
-func sshIntoInstance(logger *zap.Logger, sess *session.Session, instance *ec2.Instance) (*ssh.Client, error) {
+func sshIntoInstance(ctx context.Context, logger *zap.Logger, sess *session.Session, instance *ec2.Instance) (*ssh.Client, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		return nil, err
@@ -146,7 +156,7 @@ func sshIntoInstance(logger *zap.Logger, sess *session.Session, instance *ec2.In
 		InstanceOSUser:   aws.String("ec2-user"),
 		SSHPublicKey:     aws.String(string(pubKeyBytes)),
 	}
-	_, err = ec2InstanceConnectSvc.SendSSHPublicKeyWithContext(context.TODO(), &input)
+	_, err = ec2InstanceConnectSvc.SendSSHPublicKeyWithContext(ctx, &input)
 	if err != nil {
 		logger.Error("failed to send ssh public key", zap.Error(err))
 		return nil, err
@@ -164,10 +174,6 @@ func sshIntoInstance(logger *zap.Logger, sess *session.Session, instance *ec2.In
 			ssh.PublicKeys(signer),
 		},
 		HostKeyCallback:   ssh.InsecureIgnoreHostKey(),
-		BannerCallback:    nil,
-		ClientVersion:     "",
-		HostKeyAlgorithms: nil,
-		Timeout:           0,
 	}
 	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", *instance.PublicIpAddress), &clientConfig)
 	if err != nil {
