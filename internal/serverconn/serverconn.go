@@ -72,10 +72,6 @@ func (s *ServerConn) SshClient(ctx context.Context) (*ssh.Client, error) {
 	input := ec2.DescribeInstancesInput{
 		Filters: []*ec2.Filter{
 			{
-				Name:   aws.String("tag:project"),
-				Values: []*string{aws.String("novacloud-testing")},
-			},
-			{
 				Name:   aws.String("tag:role"),
 				Values: []*string{aws.String(s.role)},
 			},
