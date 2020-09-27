@@ -54,19 +54,17 @@ func (s *ServerConn) Run(ctx context.Context) {
 			)
 			return
 		}
-		go s.HandleConn(conn, fmt.Sprintf("127.0.0.1:%d", s.port))
+		go s.HandleConn(ctx, conn, fmt.Sprintf("127.0.0.1:%d", s.port))
 	}
 }
 
-func (s *ServerConn) SshClient() (*ssh.Client, error) {
+func (s *ServerConn) SshClient(ctx context.Context) (*ssh.Client, error) {
 	s.l.Lock()
 	defer s.l.Unlock()
 	if s.sshClient != nil {
 		return s.sshClient, nil
 	}
-	svc, err := session.NewSessionWithOptions(session.Options{
-		Config: aws.Config{Region: aws.String("us-east-2")},
-	})
+	svc, err := session.NewSession()
 	if err != nil {
 
 	}
@@ -87,9 +85,10 @@ func (s *ServerConn) SshClient() (*ssh.Client, error) {
 			},
 		},
 	}
-	output, err := ec2svc.DescribeInstancesWithContext(context.TODO(), &input)
+	output, err := ec2svc.DescribeInstancesWithContext(ctx, &input)
 	if err != nil {
 		s.logger.DPanic("error describing instances", zap.Error(err))
+		return nil, err
 	}
 	for _, reservation := range output.Reservations {
 		for _, instance := range reservation.Instances {
@@ -106,8 +105,8 @@ func (s *ServerConn) SshClient() (*ssh.Client, error) {
 
 }
 
-func (s *ServerConn) HandleConn(conn net.Conn, address string) {
-	client, err := s.SshClient()
+func (s *ServerConn) HandleConn(ctx context.Context, conn net.Conn, address string) {
+	client, err := s.SshClient(ctx)
 	if err != nil {
 		s.logger.DPanic("error getting ssh client", zap.Error(err))
 		return
