@@ -44,7 +44,7 @@ func (s *ServerConn) Run(ctx context.Context) {
 		)
 		return
 	}
-	go func(){
+	go func() {
 		<-ctx.Done()
 		ln.Close()
 	}()
@@ -76,7 +76,8 @@ func (s *ServerConn) SshClient(ctx context.Context) (*ssh.Client, error) {
 	}
 	svc, err := session.NewSession()
 	if err != nil {
-
+		s.logger.Error("error getting aws session", zap.Error(err))
+		return nil, err
 	}
 	ec2svc := ec2.New(svc)
 	input := ec2.DescribeInstancesInput{
@@ -98,7 +99,7 @@ func (s *ServerConn) SshClient(ctx context.Context) (*ssh.Client, error) {
 	}
 	for _, reservation := range output.Reservations {
 		for _, instance := range reservation.Instances {
-			client, err := sshIntoInstance(ctx, s.logger, svc, instance)
+			client, err := s.sshIntoInstance(ctx, svc, instance)
 			if err != nil {
 				s.logger.DPanic("failed to ssh into instance", zap.Error(err))
 				return nil, err
@@ -138,7 +139,7 @@ func (s *ServerConn) HandleConn(ctx context.Context, conn net.Conn, address stri
 	wg.Wait()
 }
 
-func sshIntoInstance(ctx context.Context, logger *zap.Logger, sess *session.Session, instance *ec2.Instance) (*ssh.Client, error) {
+func (s *ServerConn) sshIntoInstance(ctx context.Context, sess *session.Session, instance *ec2.Instance) (*ssh.Client, error) {
 	privateKey, err := rsa.GenerateKey(rand.Reader, 4096)
 	if err != nil {
 		return nil, err
@@ -158,10 +159,13 @@ func sshIntoInstance(ctx context.Context, logger *zap.Logger, sess *session.Sess
 	}
 	_, err = ec2InstanceConnectSvc.SendSSHPublicKeyWithContext(ctx, &input)
 	if err != nil {
-		logger.Error("failed to send ssh public key", zap.Error(err))
+		s.logger.Error("failed to send ssh public key", zap.Error(err))
 		return nil, err
 	}
-	logger.Info("sent ssh public key", zap.String("ip_address", *instance.PublicIpAddress))
+	s.logger.Info("sent ssh public key",
+		zap.String("ip_address", *instance.PublicIpAddress),
+		zap.String("role", s.role),
+	)
 
 	signer, err := ssh.NewSignerFromKey(privateKey)
 	if err != nil {
@@ -173,9 +177,13 @@ func sshIntoInstance(ctx context.Context, logger *zap.Logger, sess *session.Sess
 		Auth: []ssh.AuthMethod{
 			ssh.PublicKeys(signer),
 		},
-		HostKeyCallback:   ssh.InsecureIgnoreHostKey(),
+		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
-	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", *instance.PublicIpAddress), &clientConfig)
+	var publicIPAddress string
+	if instance != nil {
+		publicIPAddress = *instance.PublicIpAddress
+	}
+	client, err := ssh.Dial("tcp", fmt.Sprintf("%s:22", publicIPAddress), &clientConfig)
 	if err != nil {
 		return nil, err
 	}
