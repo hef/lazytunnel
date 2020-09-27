@@ -109,7 +109,6 @@ func (s *ServerConn) SshClient(ctx context.Context) (*ssh.Client, error) {
 		}
 	}
 	return nil, errors.New("failed to ssh into anything")
-
 }
 
 func (s *ServerConn) HandleConn(ctx context.Context, conn net.Conn, address string) {
