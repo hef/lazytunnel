@@ -1,6 +1,6 @@
 module github.com/hef/lazytunnel
 
-go 1.14
+go 1.19
 
 require (
 	github.com/aws/aws-sdk-go v1.38.40
